@@ -1,0 +1,1767 @@
+---
+title: "Property Tax Foreclosure Early Warning System:<br>A Look into Philadelphia"
+author: "Sydney Goldstein, Nate Klass, Justine Kone"
+date: "May 2018"
+output:  
+  html_document:
+   toc: true
+   toc_depth: 5
+   toc_float: true
+   theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE)
+load("FORECLOSURE_FINAL_WORKSPACE.RData")
+
+library(sf)
+library(tidyverse)
+library(viridis)
+library(gridExtra)
+library(grid)
+library(knitr)
+
+options(scipen = 999)
+```
+
+_The following project was created in association with the MUSA 801 Practicum at the University of Pennsylvania, taught by Ken Steif, Karl Dailey, and Michael Fichman. All products from this class should be considered proofs of concept and works in progress._
+
+_This document is split into two parts: one, for those interested in the policy implications of our study, and the other, for those interested in replicating our methodolgy. The policy implications are explored in a case study broken into four sections: [Introduction](#introduction), [Exploratory Analysis](#exploratory-analysis), [Feature Engineering](#feature-engineering), and [Model-Building](#model-building). Our methods can be replicated by following the [Data Wrangling](#data-wrangling-appendix), [Modeling](#model-building-appendix), and [Visualizations](#visualizations) appendices. A [data dictionary](#data-dictionary) is provided at the end of the document._
+
+## 1. Introduction
+
+For decades, the property tax system in Philadelphia was antiquated, with residential properties [rarely being assessed at market value](http://www.pewtrusts.org/~/media/legacy/uploadedfiles/philadelphiapropertytaxespdf.pdf). This created issues for the City, which relies on property taxes as one of the main sources of revenue. In an effort to correct the errors in the assessment system, the Philadelphia City Council adopted the Actual Value Initiative (AVI) in 2013. 
+
+The adoption of this policy led to the reassessment of property taxes for all properties in the city. Recently sold homes had more up-to-date tax assessments based on market values, but others had not been reassessed since the 1980s. As a result, many homeowners experienced large spikes in their property taxes and found it difficult to pay their taxes, leading to an increase in homeowners undergoing property tax foreclosure.
+
+The foreclosure process is complicated, and many homeowners have little to no knowledge of how to navigate it once it has begun. Below, Figure 1 illustrates a simplified version of the process, which, including tax delinquency, still consists of 14 events.
+
+![Tax Foreclosure Flow Chart](Tax Foreclosure Flow Chart_new.jpg)_Source: Catherine Martin, [Community Legal Services](https://clsphila.org/)_
+
+Although the City has [several tax relief and exemption programs](https://www.phila.gov/OPA/Documents/AVI%20Brochure%20PDF%2002-06-13.pdf), only a small portion of homeowners are actually enrolled in these programs or in payment plans with the Department of Revenue. To decrease the number of homeowners entering the foreclosure process, and increase the number of homeowners receiving necessary aid, there must be a more efficient way to target those in need of financial advice to avoid foreclosure and sheriff sale. 
+
+### 1.1 Abstract
+
+The goal of the housing foreclosure early warning system is to assist both legal advocates and the City in identifying residential property owners who are at high risk of tax foreclosure. This study provides a model that can predict, based on historical data, the probability a household will be foreclosed upon and lose their home to sheriff sale. The results suggest this model predicts equally effectively across all neighborhoods throughout Philadelphia and can inform the outreach process to help advocates target homeowners vulnerable to sheriff sale.
+
+### 1.2 Motivation 
+
+The current process for reaching homeowners at risk of property tax foreclosure is limited, with door-to-door outreach only occurring in locations with funding from the [Neighborhood Advisory Committee Program](http://ohcdphila.org/neighborhood-resources/neighborhood-advisory-committees/). Working with Jonathan Pyle at the [Philadelphia Leagal Assistance](https://www.philalegal.org/), who provided much of the court data used in this project, we created a tool that will improve outreach to populations targeted for maximum resource allocation.
+
+### 1.3 Methods in Brief 
+
+This analysis was completely based on publicly available data, specifically data scraped from administrative websites and from [Philadelphia's open data portal](https://www.opendataphilly.org/). After cleaning this data, we conducted an [exploratory analysis](#exploratory-analysis) to better understand the trends of property tax foreclosure. We used the results to [feature engineer](#feature-engineering) variables associated with the spatial and time variations of foreclosure, and inform the creation of models that predict the probability of sheriff sale. 
+
+### 1.4 Modeling Strategy
+
+We initially attempted to cretae one comprehensive model, but the court data, specifically the extent to which a household was engaged in the foreclosure process, was overfitting the model. This was due to the fact that being involved in the foreclosure process made the probability of sheriff sale significantly higher. Thus any household with court data was being preicted to experience sheriff sale. To avoid this issue, we used an ensemble approach and developed several models to explore three distinct "stories" associated with foreclosure: tax delinquency, the court process, and neighborhood factors. Since these models appeared to tell unique stories about the risk of sheriff sale, we combined them in an ensemble model to capture the efficacy of all three stories. We validated the ensemble model using several metrics to ensure our predictions were accurate regardless of property location. 
+
+## 2. Exploratory Analysis
+
+Ultimately, we were able to create the early warning system through in-depth examination of the foreclosure process. Property tax foreclosure is a complicated process and reducing foreclosures would improve quality of life for Philadelphia residents. Housing instability has been linked to several adverse impacts, and as Matthew Desmond wrote in *Evicted: Poverty and Profit in the American City*, "Decent, affordable housing should be a basic right for everybody in this country. The reason is simple: without stable shelter, everything else falls apart" (p. 300). To improve upon the current system, we needed to gain an understanding of the temporal process of foreclosure, which would help to inform court variables that we included in our model. We utilized a data-driven approach and explored foreclosure with three main questions in mind:
+
+1. [Understanding the Foreclosure Process Over Time ](#understanding-the-foreclosure-process-over-time) and how does it vary from property to property? 
+
+2. [Where are sheriff sales occurring](#where-are-sheriff-sales-occurring) in Philadelphia? 
+
+3. [What neighborhood factors](#what-neighborhood-factors-coincide-with-areas-of-high-rates-of-sheriff-sales) coincide with areas of high rates of sheriff sales? 
+
+### 2.1 Understanding the Foreclosure Process Over Time
+
+Property tax foreclosure can be a confusing process for homeowners. [Philadelphia Legal Assistance](https://www.philalegal.org/saveyourhomephilly) receives over 14,000 calls a year regarding questions about tax foreclosure and has stated that the process has many nuances that make each case unique. To better understand tax foreclosure in Philadelphia, we analyzed the number of foreclosures occurring and how long the process lasts on average.
+
+#### 2.1.1 How Many Properties Have Cases Opened Against Them?
+
+There are about 458,000 residential parcels in Philadelphia. Of these, 7% have had a foreclosure court case opened against them within the past seven years. [Figure 2]( #count-of-parcels-seeing-a-commencement-of-civil-action) shows that the number of court records of commencement of civil action, the first step in the court process, has dramatically increased since 2013, the year the AVI was adopted. 
+
+```{r 2.1.1BarGraph, echo=FALSE, results='hide', message = FALSE, warning=FALSE, fig.width=8.5, cache=TRUE}
+commenceBar
+```
+
+Of the properties that began the foreclosure court process, 18% (about 5,900) have gone to sheriff sale, meaning 1% of all residential properties have been sold at sheriff sale in the last seven years.
+
+#### 2.1.2 The Court Process in Time Series
+
+While we know the number of foreclosure cases has been increasing, it remains unclear how long the foreclosure process generally takes since each case is unique. The following figures show how quickly properties move through the foreclosure process by illustrating the rate of a given event in months since the start of a case. The time series explores the hypothesis that the farther along a property is in the foreclosure process, the higher the risk of sheriff sale. 
+
+_Events at the Beginning of a Court Case_
+
+Before a lawsuit is filed, a property becomes delinquent and two notices indicating delinquency are sent to the homeowner. If the amount sought is not paid, the City files a lawsuit. Five events are associated with this progression:  a penalty accruing for a tax period, commencing of civil action, filing an amended tax claim, levying a city charge, and setting the status to active case. [Figure 3](#time-series-visualizations) shows the highest rate of these events at the start of a case. 
+
+```{r earlyPlots, echo=FALSE, results='hide', fig.width = 8.5, warning=FALSE, message = FALSE}
+earlyPlots
+```
+
+_Events in the Middle of a Court Case_
+
+After the court process has been initiated, events representing court action occur. An affidavit of service filed can be entered towards the beginning of a case or as one of the last entries. If a year or more has passed, the affidavit was most likely the last filing before the case closed, thus, affidavit of service filed could indicate less risk of sheriff sale. An order and decree, which indicates the court has decided to put the property up for sheriff sale, may also be filed during this time. [Figure 4](#time-series-visualizations) shows that the majority of these events occur shortly after a case has been opened. 
+
+```{r midPlots, echo=FALSE, results='hide', fig.width = 8.5, warning=FALSE, message = FALSE}
+midPlots
+```
+
+_Events at the End of a Court Case_
+
+Finally, events related to sheriff sales occur at the end of the foreclosure process. A sheriff sale may be postponed, or a property could become stayed, stopping the sheriff sale from occurring. This could happen because either the homeowner entered into a payment plan or the homeowner was able to pay the amount being sought. A property becoming stayed is generally viewed as a positive outcome because it indicates a homeowner was able to keep their home. [Figure 5](#time-series-visualizations) shows that more properties were put up for sale early in the foreclosure process, but sheriff sales were drawn out over a longer period of time.
+
+```{r finalPlots, echo=FALSE, results='hide', fig.width = 8.5, warning=FALSE, message = FALSE}
+finalPlots
+```
+
+### 2.2 Where are Sheriff Sales Occurring? 
+
+Although the tax foreclosure process differs from property to property, does the number of sheriff sales vary across space? Sheriff sales are relatively rare events. We found it beneficial to [aggregate them as a percentage]( #sheriff-sales-by-political-ward-and-council-district) of total properties within a political ward or city council district to determine areas of high concentration of sheriff sales.
+
+```{r wardsCouncils, echo=FALSE, results='hide', fig.width=8.5, warning=FALSE, message = FALSE}
+grid.arrange(council, ward, ncol=2, top = title_wardCouncil)
+```
+
+Overall, we found that sheriff sales were mostly occurring in Northern and Western Philadelphia, areas that historically have had higher concentrations of communities of color and low-income residents. The concentration in these areas encouraged us to explore neighborhood variables as predictors of sheriff sales. 
+
+### 2.3 What Neighborhood Factors Coincide with Areas of High Rates of Sheriff Sales?
+
+To test if attributes associated with neighborhood neglect were related to a property's risk of foreclosure, we analyzed whether the distance to [SNAP retail locations](#data-dictionary) and [311 complaints of dangerous buildings, vacant lots, vacant houses, graffiti, and abandoned vehicles](#data-dictionary) varied between properties that went to sheriff sale and those that did not. The plots in Figures 7-12 show that distance to SNAP retailers, dangerous buildings, vacant lots, and vacant houses could be correlated with risk of sheriff sale, as the distance for sheriff sale parcels was noticeably lower than for other properties.
+
+```{r 311, echo=FALSE, results='hide', warning=FALSE, message = FALSE, fig.width=8.5, fig.height=25.5}
+grid.arrange(snap_grid, dngr_grid, vclt_grid, vchs_grid, graffiti_grid, abveh_grid, ncol = 1, nrow = 6)
+```
+
+#### 2.3.1 Relationship Between Sheriff Sale and Census Tract-Level Factors
+
+Social factors at an aggregated level might catch variability that distance features missed. Jonathan Pyle at the PLA expressed that it can be difficult to determine if properties in the foreclosure process are occupied or vacant, indicating vacancy levels might be correlated with sheriff sales. Figure 13 shows properties that went to sheriff sale were located in census tracts with higher vacancy rates.
+
+```{r censusVac, echo=FALSE, results='hide', message = FALSE, warning=FALSE, fig.width=8.5}
+grid.arrange(vacancy_map, vacancy_plot, ncol = 2, top = title_vac) 
+```
+
+Cost burden, or a person spending more than 30% of their income on housing costs, is another social factor that can contribute to housing instability. Figure 14 shows the distribution of cost-burdened homeowners at the census tract-level in Philadelphia. Despite the variation, properties that were foreclosed upon seem to reside in census tracts with similar proportions of cost-burdened homeowners as properties that did not go to sheriff sale.  
+
+```{r censusBur, echo=FALSE, results='hide', message = FALSE, warning=FALSE, fig.width=8.5}
+grid.arrange(cb_map, cb_plot, ncol = 2, top = title_costbur, bottom = note_costbur)
+```
+
+#### 2.3.2 Is There a Historical Precedent in These Areas?
+
+Like many cities in the United States, Philadelphia has a history of disinvestment in areas previously graded poorly on maps created by the Home Owner's Loan Corporation (HOLC). The HOLC maps were published in 1939, yet [research](https://poseidon01.ssrn.com/delivery.php?ID=743026093126097127092093118120126066037017048084024017014107072023102021031079099024041053042031049004119124085097094079086029111041044041067008096004066125109011092018054056094106072074023097067113089095126078072066111070031088074101029009088017065069&EXT=pdf) indicates that there are long-term effects of discriminatory credit practices, such as lower property values. Figure 15 shows there is a clear relationship between historical discrimination and sheriff sales, since the number of residential parcels that went to sheriff sale increases as the HOLC grade worsens.  
+
+```{r HOLC, echo=FALSE, results='hide', warning=FALSE, fig.width = 8.5, message = FALSE}
+grid.arrange(plot2, plot1, ncol = 2, top = title_HOLC)
+```
+
+## 3. Feature Engineering
+
+The themes examined in the exploratory analysis reflected most of our hypotheses, however, there were several aspects of the foreclosure process we believed to be important that were overlooked in the initial data. To include these missing parts in the modeling process, we engineered several variables. This process of feature engineering involved transforming initial data into variables that would be better predictors in the model. Engineering these variables allowed us to use the knowledge gained in exploratory analysis to create variables that were more likely to be correlated with sheriff sales. 
+
+For example, we assumed that once a property enters the court system, the probability of it going to sheriff sale would increase dramatically. However, most properties in Philadelphia have not entered the court system for property tax foreclosure, and therefore, do not have a case open against them. This is shown by the low rates of court events in [Figure 16](#court-rate-bar-chart). To test this hypothesis, we engineered fixed-effect variables that indicated whether a property had reached a specific event or not.
+
+```{r courtFeat, echo=FALSE, results='hide', warning=FALSE, fig.width = 8.5, message = FALSE}
+cRatePlot 
+```
+
+Aside from court events, several variables were created that accounted for spatial association with nearby properties and the condition of the property itself. Other engineered variables reflected the history of the property, like whether it had been sold at sheriff sale previously. More information on these variables can be found in [Section 6](#data-wrangling-appendix).
+
+## 4. Model-Building
+
+For our initial models, we included all of the variables from our dataset. However, it quickly became apparent that the court data predicted too well, meaning it monopolized the predictive power so that the model largely ignored data that our exploratory analysis suggested was important. Furthermore, the court data was so powerful that it overfit our model, making it so accurate at predicting for our specific dataset that it would not have performed well on unseen data. [Figure 20](#fig20) shows that a model with only the court data had an accuracy of over 99%.   
+
+Our final model needed to perform well on new data in order to be successful in predicting property tax foreclosure. To ensure this was the case, we randomly split the dataset in half to create a training set, which we use to train our model, and a hold-out test set, which we use to validate our model by simulating how the model would perform on unseen data.
+
+### 4.1 Explaining the Foreclosure Process Through Three Distinct Stories
+
+Due to our concern about keeping the court data in the same model as the rest of our data, we looked back to our exploratory analysis, which indicated that the variables formed three distinct stories about foreclosure: tax delinquency, the court process, and associated neighborhood factors. Based on this, we created several iterations of models for each story (covered in more detail in [Section 7](#model-building-appendix)). Figure 17 shows that each story is unique. The correlation between them is very low, with the greatest relationship occurring between the tax and neighborhood stories. Confirming that each story truly represented a different way to predict sheriff sales was necessary to ensure that ensembling them into a single model would decrease variance. If the individual models were too similar, the resulting ensemble model would simply exhibit the same characteristics, and problems, as the individual models. So, if all of our models were just like the court model, our ensemble would be overfit as well.
+
+```{r correlation, echo=FALSE, results='hide', warning=FALSE, fig.width = 8.5, message = FALSE}
+grid.arrange(scatter1, scatter2, scatter3, ncol = 3, top = title_scatter)
+```
+
+The validation of these models indicated the court events overfit the model because once a property had a court event on record, the model predicted it would go to sheriff sale. However, we know that not to be the case. On the other hand, the neighborhood and tax stories underfit the model, meaning they couldn't capture enough of the foreclosure process and didn't predict accurately.
+
+### 4.2 Final Model
+
+To alleviate these issues, we ensembled these three stories into a single model to predict the risk of a property going to sheriff sale more accurately. Figure 18 shows that the court story is the most important in the final model, followed by the neighborhood and tax stories.
+
+```{r standardized, echo=FALSE, results='hide', warning=FALSE, fig.width = 8.5, message = FALSE}
+stand.ensemble
+```
+
+Using various metrics, we determined how well the model predicted for unknown data by validating it on the test set. Figure 19 illustrates the tradeoff between getting the prediction correct versus incorrect for each model. The ROC curve for the ensemble model shows the tradeoff is more reasonable than for the individual stories, since the harsh right angle of the court model's curve shows that the court data is overfit, and the shallow curve of the tax model shows that the tax data is underfit.
+
+```{r ROC, echo=FALSE, results='hide', warning=FALSE, fig.width = 8.5, fig.height = 7, message = FALSE}
+title_roc <- textGrob("Figure 19. ROC Curves for Final Models", 
+                              gp=gpar(fontface="plain", size = 14))
+
+
+layout_roc <- rbind(c(1,1,2),
+                    c(1,1,3),
+                    c(1,1,4))
+
+grid.arrange(roc_ensemble, roc_final.court, roc_final.tax, roc_final.nHood, layout_matrix = layout_roc, top = title_roc)
+```
+
+Assessing the tradeoff for each model is important given the immense social costs of not providing aid to someone at risk of foreclosure, as well as the monetary costs of providing outreach to a homeowner that is not at risk of sheriff sale. Incorrectly predicting that a property will go to sheriff sale, and thus allocating resources to a homeowner that doesn't need assistance would waste time and money. The social costs are even greater, as incorrectly predicting that a property won't go to sheriff sale, and therefore depriving that homeowner of assistance when they need it, would not only waste time and money in court, but it could also lead to someone losing their home. As a result, we exercised particular caution in assessing this tradeoff to ensure that we accounted for these social costs.
+
+The combined model outperformed the three stories, particularly regarding the true negative rate, or specificity, shown in Figure 20. Maximizing this metric could help reduce the high social costs associated with getting the prediction in correct. Ultimately, combining the models entered enough variation and noise into the equation to smooth out the overall story of foreclosure and make the model's predictions more accurate.  
+
+**<a name="fig20"></a>Figure 20. Summary of Model Results**
+
+Model Number | Model Name | Description | AUC | Accuracy | Specificity | Sensitivity
+-------------|------------|-------------|-----|----------|-------------|------------
+1 | Ensemble Model | Ensemble of three final logistic regression models | 0.9368 | 0.9912 | 0.9016 | 0.9916
+2 | Final Court Model | Important court count & dummy variables | 0.9962 | 0.9933 | 0.8268 | 0.9948 
+3 | Final Tax Model | Important tax variables | 0.6206 | 0.9873 | 0.1176 | 0.9859
+4 | Final Neighborhood Model | Important neighborhood variables | 0.8167 | 0.9872 | 0.1075 | 0.9869
+
+As a result, the model's predictions reflect current trends. Figure 21 shows the model predicts the highest risk of sheriff sale in Northern and Western Philadelphia, which are the same areas our exploratory analysis highlighted as places with more sheriff sales.
+
+```{r predProbs, echo=FALSE, results='hide', warning=FALSE, fig.width = 8.5, message = FALSE}
+pred_ensemble
+```
+
+To ensure the model's accuracy was not a coincidence of sample, we used cross validation to determine the model was generalizable. We generated a random test set, trained the model on the remaining data, and then tested the model on the holdout sample for 100 iterations. Figure 22 illustrates the accuracy for each subset is similar, showing the model is robust.    
+
+```{r 100CV, echo=FALSE, results='hide', warning=FALSE, fig.width = 8.5, message = FALSE}
+cv.ensemble
+```
+
+It is not only important that our model predicts well for random subsamples, but it is also imperative that the model is generalizable across space as well. This was determined through spatial cross validation. We tested the model on all neighborhoods with residential properties and greater than five sheriff sales. Figure 23 shows the model's accuracy is consistent across Philadelphia because the area under the curve, a goodness of fit metric for categorial models, is similar between neighborhoods. This indicates the model is not biased towards neighborhood composition as it performed well for both high- and low-income areas as well as majority-minority and non-minority neighborhoods. 
+
+```{r spatialCV, echo=FALSE, results='hide', warning=FALSE, fig.width = 8.5, message = FALSE}
+spatialCV.ensemble
+```
+
+We believe some of the variation in the model's performance across neighborhoods is a result of historical disinvestment, as these are areas graded poorly by the HOLC maps. Therefore, these neighborhoods may have a higher rate of sheriff sale, than other areas in Philadelphia. This downfall of the model could be improved with additional feature engineering, especially focusing on time variables, increasing the sample size of sheriff sales, or using more advanced machine learning techniques. 
+
+## 5. Conclusion
+
+Armed with a model that we believe has significant predictive power, we created a [web app](insert link) that uses our predictions to inform a more targeted outreach to at-risk homeowners. We hope that this data-driven approach will benefit the Philadelphia Legal Assistance in their work to help low-income homeowners in Philadelphia avoid foreclosure and sheriff sale. Using our methods to boost the power of their outreach, we hope more homeowners will be able to stay in their homes and avoid the emotional and physical stress that foreclosure can bring. Stable homes and stable neighborhoods can maintain communities and livelihoods across Philadelphia.
+
+## 6. Data Wrangling Appendix
+
+To conduct our analysis, we created a single dataset from multiple sources. This section walks through the steps taken to compile this dataset, as well as how we wrangled particular datasets to produce useful variables. In order to recreate the final dataset, it is important to start at this point, and follow the data wrangling section through its entirety.
+
+### 6.1 Creating the `Residential` Shapefile
+
+We began the data wrangling process by creating a shapefile of residential parcels in Philadelphia. In this case, up-to-date parcel information was only available in CSV format from the [OPA assessment page](http://www.phila.gov/OPA/Assessments/Pages/AssessmentData.aspx). We filtered the CSV containing all parcels in the city to only include residential properties. Using the `rgdal` package, we converted the CSV into a spatial points data frame, and saved that as a shapefile.
+
+```{r eval = FALSE}
+library(tidyverse)
+library(sf)
+library(rgdal)
+
+residential <- read.csv("OPA 2015 Certified Static Download File.txt") %>%
+  filter(Property_Category == "RESIDENTIAL")
+
+coordinates(residential) <- ~Longitude + Latitude
+
+writeOGR(residential, getwd(), 
+         "residential", driver = "ESRI Shapefile")
+```
+
+Next, we transformed the residential parcels shapefile into the appropriate coordinate system.
+
+```{r eval = FALSE}
+residential <- st_read("residential.shp")
+
+st_crs(residential) <- "+proj=longlat +datum=NAD83"  
+
+residential <- residential %>%
+  st_transform(2272)
+```
+
+### 6.2 Transforming Court Case Information
+
+First, we filtered the case dataset so that it only contained those cases pertaining to tax foreclosure. Then, we removed the duplicate listings to get a set of unique properties and their associated court data. Finally, we selected the pertinent variables from the larger dataset.
+
+```{r eval = FALSE}
+case <- read.csv("case.txt", stringsAsFactors = FALSE) %>%
+  filter(casetype == "XX - REAL ESTATE TAX LIEN PETITION") %>%
+  distinct(opa_number, .keep_all = TRUE) %>%
+  select(docketnum, opa_number, owner_occupied) %>%
+  rename(Accnt_N = opa_number,
+         Ownr_oc = owner_occupied,
+         Dckt_Nm = docketnum)
+```
+
+### 6.3 Obtaining Nearest Neighbor Distances
+
+To calculate the nearest neighbor distances, we read in 311 point data from OpenDataPhilly and created new data frames for the five 311 service types that we were interested in studying. We also filtered the results to limit them to complaints within Philadelphia, since some of the data was located outside the city.
+
+```{r eval = FALSE}
+library(FNN)
+
+Call311 <- read.csv("public_cases_fc.csv")
+
+Abvehicles <- filter(Call311, 
+                     service_name == "Abandoned Vehicle") %>% 
+              drop_na() %>%
+              filter(lon < -72, lon > -80, lat > 39, lat < 41)
+
+Graffiti <- filter(Call311, 
+                   service_name == "Graffiti Removal") %>% 
+            drop_na() %>%
+            filter(lon < -72, lon > -80, lat > 39, lat < 41)
+
+VacHouse <- filter(Call311, 
+                   service_name == "Vacant House or Commercial") %>% 
+            drop_na() %>%
+            filter(lon < -72, lon > -80, lat > 39, lat < 41)
+
+VacLot <- filter(Call311, 
+                 service_name == "Vacant Lot Clean-Up") %>% 
+          drop_na() %>%
+          filter(lon < -72, lon > -80, lat > 39, lat < 41)
+
+DangBldg <- filter(Call311, 
+                   service_name == "Building Dangerous") %>% 
+            drop_na() %>%
+            filter(lon < -72, lon > -80, lat > 39, lat < 41)
+```
+
+After we created our specific 311 data frames, we turned them into spatial points objects and saved them as shapefiles. We used the same process for the SNAP data downloaded from the USDA. The code below uses SNAP as an example, but it was repeated for all 311 points as well. 
+
+```{r eval = FALSE}
+snap_geo <- read.csv("snap_geo.csv")
+snap_geo <- na.omit(snap_geo)
+coordinates(snap_geo) <- ~coords.lon + coords.lat 
+
+writeOGR(snap_geo, getwd(), 
+         "snap_geo", driver = "ESRI Shapefile")
+```
+
+Then we re-projected these shapefiles into the correct coordinate system for our area (Pennsylvania South State Plane projection). Lastly, we added a `landUse` field to differentiate the neighborhood variable shapefiles from the `residential` shapefile.
+
+```{r eval = FALSE}
+snap_geo_nn <- st_read("snap_geo.shp")
+st_crs(snap_geo_nn) <- "+proj=longlat +datum=NAD83"
+
+snap_geo_nn <- snap_geo_nn %>%
+  st_transform(2272) %>%
+  select(geometry) %>%
+  mutate(landUse = "snap")
+
+residential_nn <- residential %>%
+  select(geometry) %>%
+  mutate(landUse = "parcels")
+```
+
+Next, we appended the rows of the SNAP dataset to the `residential_nn` dataset and bound the longitude and latitude columns to our newly created `allPlaces` data frame.
+
+```{r eval = FALSE}
+allPlaces <- rbind(residential_nn, snap_geo_nn)
+allPlaces <- cbind(as.data.frame(st_coordinates(allPlaces)), 
+                   data.frame(allPlaces))
+```
+
+We created a matrix of the parcel points and a matrix of the SNAP points. These matrices allowed us to use them in a function to measure the distance from one to the other.
+
+```{r eval = FALSE}
+parcelsXY <-
+  allPlaces %>%
+  filter(landUse == "parcels") %>%
+  select(X,Y) %>%
+  as.matrix()   
+
+snapXY <-
+  allPlaces %>%
+  filter(landUse == "snap") %>%
+  select(X,Y) %>%
+  as.matrix()
+```
+
+Below is the nearest neighbor function we used. This function simplified the process of calculating nearest neighbor distances and created an output that included the average point distance from one place to another - in our case, from parcels to SNAP and 311 points.
+
+```{r eval = FALSE}
+nn_function <- function(measureFrom,measureTo,k) {
+  
+  nn <-   
+    get.knnx(measureTo, measureFrom, k)$nn.dist
+  
+  output <-
+    as.data.frame(nn) %>%
+    rownames_to_column(var = "thisPoint") %>%
+    gather(points, point_distance, V1:ncol(.)) %>%
+    arrange(as.numeric(thisPoint)) %>%
+    group_by(thisPoint) %>%
+    summarize(pointDistance = mean(point_distance)) %>%
+    arrange(as.numeric(thisPoint)) %>% 
+    select(-thisPoint)
+  
+  return(output)  
+}
+```
+
+We called the function on the matrices to create nearest neighbor distances, such as the `snapDistance` shown below. We joined that to the parcels data frame and selected the columns we wanted to keep.
+
+```{r eval = FALSE}
+snapDistance <- nn_function(parcelsXY,snapXY,5)
+
+residential_df <- residential %>% as.data.frame()
+parcels_snap_join <- cbind(residential_df, snapDistance)
+
+snap_nn <- parcels_snap_join %>%
+  select(Accnt_N, Hmstd_E, Mrkt_Vl, Txbl_Ln,
+         Txbl_Bl, geometry, pointDistance) %>% 
+  rename(D_Snap = pointDistance)
+```
+
+We took this final result for each variable and joined it to the `snap_nn` data one-by-one.
+
+```{r, eval = FALSE}
+parcels_snap_abvehicles_join <- left_join(
+  snap_nn, abvehicle_nn, 
+  by = "Accnt_N")
+
+parcels_snap_abvehicles_graffiti_join <- left_join(
+  parcels_snap_abvehicles_join, graffiti_nn, 
+  by = "Accnt_N")
+
+parcels_snap_abvehicles_graffiti_vachouse_join <- left_join(
+  parcels_snap_abvehicles_graffiti_join, vacHouse_nn, 
+  by = "Accnt_N")
+
+parcels_snap_abvehicles_graffiti_vachouse_vaclot_join <- left_join(
+  parcels_snap_abvehicles_graffiti_vachouse_join, vacLot_nn, 
+  by = "Accnt_N")
+
+parcels_snap_abvehicles_graffiti_vachouse_vaclot_dangbldg_join <- left_join(
+  parcels_snap_abvehicles_graffiti_vachouse_vaclot_join, dangBldg_nn, 
+  by = "Accnt_N")
+```
+
+Finally, we gave the dataset a shorter name: `resNN_join`.
+
+```{r, eval = FALSE}
+resNN_join <- parcels_snap_abvehicles_graffiti_vachouse_vaclot_dangbldg_join
+```
+
+### 6.4 Neighborhood Density Variables
+
+While nearest neighbor distances could help determine risk of sheriff sale, density variables of these same features (SNAP retailers and 311 complaints) could also explain a home's probability of being foreclosed upon. Creating kernel density in R requires three main packages: `spatstat`, `raster`, and `rasterVis`. The following steps use SNAP retailers as an example, but the same process was used to create density for 311 complaints as well.
+
+First, we loaded in the `residential` points and saved them as a sf object and a data frame. We also created X and Y coordinate columns, so the points could be mapped using `geom_point` rather than `geom_sf`. Because there are so many residential points in Philadelphia, it would have taken several hours for `geom_sf` to render them.
+
+```{r eval = FALSE}
+library(spatstat)
+library(raster)
+library(rasterVis)
+library(sf)
+library(tidyverse)
+
+points <- residential %>%
+  dplyr::select(Accnt_N, geometry) %>%
+  st_transform(2272)
+
+points_df <- points %>%
+  as.data.frame()
+
+points_forMapping <- points %>%
+  st_coordinates(points) %>%
+  as.data.frame()
+```
+
+We then transformed the points into a matrix, so a `window` could be made, which represents the spatial extent of the points.
+
+```{r eval = FALSE}
+points_matrix <- as.matrix(st_coordinates(points))
+
+window <- owin(c(min(points_matrix[,1]), 
+                 max(points_matrix[,1])), 
+               c(min(points_matrix[,2]), 
+                 max(points_matrix[,2])))
+```
+
+Using the snap shapefile created above in [Section 6.3](#obtaining-nearest-neighbor-distances), we transformed the data into the appropriate coordinate system and used `st_coordinates` to create latitude and longitude values. These points were then made into a matrix.
+
+```{r eval = FALSE}
+snap <- st_read("snap_geo.shp")
+st_crs(snap) <- "+proj=longlat +datum=NAD83"
+snap <- snap %>%
+  st_transform(2272)
+
+snap_forMapping <- snap %>%
+  st_coordinates(snap) %>%
+  as.data.frame()
+
+snap_matrix <- as.matrix(st_coordinates(snap))
+```
+
+Next, we converted the `snap_matrix` into a ppp object and transformed it into a density raster.
+
+```{r eval = FALSE}
+snap.ppp <- as.ppp(snap_matrix, window)
+snap_densityRaster <- raster(density(snap.ppp))
+```
+
+We extracted the mean value for each residential point from the density raster and added these values back to the original points data frame.
+
+```{r eval = FALSE}
+snap_extractRaster <- raster::extract(snap_densityRaster, 
+                                      points_forMapping, fun = mean) %>%
+  as.data.frame() %>%
+  rename(snapDens = ".")
+
+snap_merge <- cbind(snap_extractRaster, points_df) %>%
+  dplyr::select(Accnt_N, snapDens) 
+```
+
+After completing this process for all the variables, we joined them together.
+
+```{r eval = FALSE}
+snap_abvehicles <- left_join(snap_merge, 
+                             abvehicle_merge, by = "Accnt_N")
+snap_abv_graffiti <- left_join(snap_abvehicles, 
+                               graffiti_merge, by = "Accnt_N")
+snap_abv_graf_vacL <- left_join(snap_abv_graffiti, 
+                                vacLot_merge, by = "Accnt_N")
+snap_abv_graf_vacL_vacH <- left_join(snap_abv_graf_vacL, 
+                                     vacHouse_merge, by = "Accnt_N")
+snap_abv_graf_vacL_vacH_dngB <- left_join(snap_abv_graf_vacL_vacH, 
+                                          DangBldg_merge, by = "Accnt_N")
+```
+
+We then gave the dataset a shorter name: `densVariables`.
+
+```{r eval = FALSE}
+densVariables <- snap_abv_graf_vacL_vacH_dngB
+```
+
+### 6.5 Census Data Wrangling using Census API
+
+In order to reduce the time associated with manually downloading variables from the Census, and to improve reproducibility, we used the Census API to access our census tract-level variables. 
+
+First, we obtained a Census API key [here](https://api.census.gov/data/key_signup.html) and installed it so that we could access the Census tables and variables.
+
+```{r eval = FALSE}
+library(tidycensus)
+
+census_api_key("your key here", install = TRUE)
+readRenviron("~/.Renviron") 
+```
+
+Then, we requested the Census variables needed to create our cost-burden and vacancy features. We set our geography to tracts, chose the 2012-2016 American Community Survey, and selected our location. Next, we selected only the variable and estimate, turned them into a data frame, and transformed it so the variables were the columns and the estimates were the rows. We renamed the variable codes and calculated the percent of vacancy and percent of homeowners who were cost-burdened. Lastly, we transformed the data frame back into a simple feature object with the correct coordinate system. 
+
+```{r eval = FALSE}
+PhillyCensusData <- 
+  get_acs(geography = "tract", variables = c("B25002_003E", "B25002_001E", 
+                                             "B25091_001E", "B25091_002E", 
+                                             "B25091_003E", "B25091_004E", 
+                                             "B25091_005E", "B25091_006E", 
+                                             "B25091_007E", "B25091_008E", 
+                                             "B25091_009E", "B25091_010E", 
+                                             "B25091_011E", "B25091_012E", 
+                                             "B25091_013E", "B25091_014E", 
+                                             "B25091_015E", "B25091_016E", 
+                                             "B25091_017E", "B25091_018E", 
+                                             "B25091_019E", "B25091_020E", 
+                                             "B25091_021E", "B25091_022E", 
+                                             "B25091_023E"), 
+          year = 2016, state = 42, county = 101, geometry = T) %>%
+  dplyr::select(variable,estimate) %>%
+  as.data.frame() %>%
+  group_by(variable) %>%
+  spread(variable,estimate) %>%
+  dplyr:: select(B25002_003, B25002_001, B25091_001, B25091_002,B25091_003, 
+         B25091_004, B25091_005, B25091_006, B25091_007, B25091_008, 
+         B25091_009, B25091_010, B25091_011, B25091_012, B25091_013, 
+         B25091_014, B25091_015, B25091_016, B25091_017, B25091_018, 
+         B25091_019, B25091_020, B25091_021, B25091_022,
+         B25091_023, geometry) %>%
+  rename(totalv = B25002_001,
+         vacant = B25002_003,
+         total = B25091_001,
+         total_mortgage = B25091_002,
+         m_lt10 = B25091_003, 
+         m_10_15 = B25091_004, 
+         m_15_20 = B25091_005, 
+         m_20_25 = B25091_006, 
+         m_25_30 = B25091_007,
+         m_30_35 = B25091_008, 
+         m_35_40 = B25091_009, 
+         m_40_50 = B25091_010, 
+         m_o50 = B25091_011, 
+         m_na = B25091_012,
+         total_nomortgage = B25091_013, 
+         nm_lt10 = B25091_014, 
+         nm_10_15 = B25091_015, 
+         nm_15_20 = B25091_016, 
+         nm_20_25 = B25091_017,
+         nm_25_30 = B25091_018, 
+         nm_30_35 = B25091_019, 
+         nm_35_40 = B25091_020, 
+         nm_40_50 = B25091_021, 
+         nm_o50 = B25091_022,
+         nm_na = B25091_023) %>%
+  mutate(pct_h_cb = ((m_30_35+m_35_40+m_40_50+m_o50+nm_30_35+nm_35_40+nm_40_50+nm_o50)/
+                                (total_mortgage+total_nomortgage)),
+         pct_vcn = ((vacant/totalv)*100),
+         year = "2016") %>%
+  dplyr::select(pct_h_cb, pct_vcn, year, geometry) %>%
+  st_sf() %>%
+  st_transform(2272)
+```
+
+After this, we joined the Census variables back to the `residential` dataset using `st_intersection` to assign each parcel the percent cost-burdened and percent vacant of the census tract in which it was located.
+
+```{r, eval = FALSE}
+resCensus_join <- st_intersection(residential, 
+                                  PhillyCensusData) %>%
+  dplyr::select(Accnt_N, year, pct_h_cb, 
+                pct_vcn, geometry) %>%
+  as.data.frame()
+```
+
+### 6.6 Historical HOLC Grades
+
+To create our HOLC grade variable, we downloaded a shapefile of historical HOLC maps from [Mapping Inequality](https://dsl.richmond.edu/panorama/redlining/#loc=4/36.71/-96.93&opacity=0.8). After reading in the shapefile, we selected the attributes of interest, and transformed it into the correct projection. 
+
+```{r eval = FALSE}
+HOLC <- st_read("HOLC_Philadelphia.shp") %>%
+  dplyr::select(city, holc_grade, geometry) %>%
+  st_transform(2272)
+```
+
+We then spatially joined `HOLC` to `residential` using a within join, so that the residential parcels received the HOLC grade of the HOLC areas they were within. 
+
+```{r eval = FALSE}
+resHOLC_join <- st_join(residential, HOLC, join = st_within) %>%
+  dplyr::select(Accnt_N, holc_grade, geometry) %>%
+  rename(HOLC = holc_grade) %>%
+  as.data.frame()
+```
+
+### 6.7 Court Event Fixed Effects and Count Variables
+
+To feature engineer variables using our court data, we began by creating `target_year`, which we used to filter the tax information down to the previous 10 years of data.
+
+```{r eval = FALSE}
+target_year <- c("2008", "2009", "2010", "2011", "2012", "2013", 
+                 "2014", "2015", "2016", "2017", "2018")
+```
+
+We also filtered the tax data to only show properties that were delinquent -- or where the penalty was greater than zero. We labeled these observations "Penalty".
+
+```{r eval = FALSE}
+library(zoo)
+
+real_estate_tax_balances <- read.csv("real_estate_tax_balances.csv") %>%
+  dplyr::select(parcel_number, tax_period, penalty) %>%
+  filter(tax_period %in% target_year,
+         penalty > 0) %>%
+  mutate(event = "Penalty",
+         date = as.Date(as.yearmon(tax_period))) %>%
+  rename(opa_number = parcel_number) %>%
+  dplyr::select(opa_number, date, event)
+```
+
+Next, we filtered the sheriff sale dataset to include only "Postponed", "Stayed", or "For Sale" events.
+
+```{r eval = FALSE}
+sheriffsales <- read.csv("sheriff_sale_info.txt") %>% 
+  mutate(date = as.POSIXct(ssdate, format = "%Y-%m-%d")) %>%
+  dplyr::select(opa_number, truesalestatus, date) %>%
+  filter(truesalestatus != "Sold To Public",
+         truesalestatus != "Sold To Bank") %>%
+  rename(event = truesalestatus)
+```
+
+Finally, we filtered the case dockets to include only the events of interest, listed in `target_type`. Since this dataset did not contain an OPA number, we used the `case` dataset to join an OPA number to the case docket entries file.
+
+```{r eval = FALSE}
+cases <- read.csv("case.txt") %>%
+  distinct(docketnum, opa_number)
+
+target_type <- c("AFDVT","ORDRF","ACTIV","CIVIL","CTYCH","AMTCF","CLLRR","SHSAL")
+
+casedockets <- read.csv("case_docket_entries.txt")
+casedockets <- left_join(casedockets, cases, by = "docketnum") %>%
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S"),
+         type = substr(type, 1, 5)) %>%
+  dplyr::select(-indexno, -person_who_filed, -dollar_value_mentioned, 
+         -docketentry, -docketnum) %>%
+  filter(type %in% target_type) %>%
+  rename(event = type)
+```
+
+Then, we combined all three datasets into a single dataset called `fore`.
+
+```{r eval = FALSE}
+fore <- rbind(real_estate_tax_balances, sheriffsales, casedockets)
+```
+
+Because going to sheriff sale is a relatively rare event, our assumption was that once a property enters the court system, the probability of the property going to sheriff sale would increase. To test this hypothesis, we created binary, fixed-effects variables. 
+
+To make these variables, we filtered out duplicate events for each property since we only needed to know if the event occurred or didn't. We grouped the data by OPA number and each event and summarized the count. Then, we transformed the data into wide format, and replaced all N/A values with zeros. Each property then had a `1` for each event that occurred in its record and a `0` if that event did not occur.
+
+```{r eval = FALSE}
+eventDummies <-
+  fore %>%
+  distinct(opa_number, event, .keep_all = TRUE) %>%
+  group_by(opa_number, event) %>%
+  summarise(count = n()) %>%
+  group_by(opa_number, event) %>%
+  spread(event, count) %>%
+  replace(is.na(.), 0) %>%
+  filter(opa_number != 0) %>% 
+  rename(Accnt_N = opa_number)
+```
+
+To complement the dummy variables, we created count variables to show how many times each event occurred for a given property. To do this, we followed the same process as above, except we did not filter out duplicate events.
+
+```{r eval = FALSE}
+eventCount <-
+  fore %>% 
+  group_by(opa_number, event) %>% 
+  summarise(count = n()) %>% 
+  group_by(opa_number, event) %>% 
+  spread(event, count) %>%
+  replace(is.na(.), 0) %>% 
+  filter(opa_number != 0) %>% 
+  rename(Accnt_N = opa_number)
+```
+
+We then joined both sets of variables to the `residential` data. 
+
+```{r eval = FALSE}
+parcel_dum <- left_join(residential, eventDummies, 
+                        by = "Accnt_N") %>% 
+  replace(is.na(.), 0) %>% 
+  rename(AFDVT_d = AFDVT,
+         ORDRF_d = ORDRF,
+         ACTIV_d = ACTIV,
+         CIVIL_d = CIVIL,
+         CTYCH_d = CTYCH,
+         AMTCF_d = AMTCF,
+         CLLRR_d = CLLRR,
+         SHSAL_d = SHSAL,
+         Penalty_d = Penalty,
+         ForSale_d = "For Sale",
+         Post_d = Postponed,
+         Stayed_d = Stayed)
+
+parcel_count <- left_join(residential, eventCount, 
+                          by = "Accnt_N") %>% 
+  as.data.frame() %>% 
+  replace(is.na(.), 0) %>% 
+  rename(AFDVT_c = AFDVT,
+         ORDRF_c = ORDRF,
+         ACTIV_c = ACTIV,
+         CIVIL_c = CIVIL,
+         CTYCH_c = CTYCH,
+         AMTCF_c = AMTCF,
+         CLLRR_c = CLLRR,
+         SHSAL_c = SHSAL,
+         Penalty_c = Penalty,
+         ForSale_c = "For Sale",
+         Post_c = Postponed,
+         Stayed_c = Stayed)
+```
+
+Finally, the event fixed effects and the event count variables were joined together as the `events` dataset.
+
+```{r eval = FALSE}
+events <- left_join(parcel_dum, parcel_count, by = "Accnt_N") %>%
+  as.data.frame() %>% 
+  dplyr::select(Accnt_N, AFDVT_c, ORDRF_c, ACTIV_c,
+                CIVIL_c, CTYCH_c, AMTCF_c, CLLRR_c,
+                SHSAL_c, Penalty_c, ForSale_c, Post_c, Stayed_c,
+                AFDVT_d, ORDRF_d, ACTIV_d,
+                CIVIL_d, CTYCH_d, AMTCF_d, CLLRR_d,
+                SHSAL_d, Penalty_d, ForSale_d, Post_d, Stayed_d)
+```
+
+### 6.8 Creation of Spatial Lag Variables
+
+The spatial lag of delinquency and the spatial lag of sale price are indicators of the five nearest neighbors' values for each variable. We created these variables to better understand how properties might be affected by their proximity to other properties. Both spatial lag variables were created using the same methodology, so the following code uses the sale price spatial lag variable as an example.
+
+First, we created a matrix of longitude and latitude data using a property dataset that contained sale price information. We also created a matrix of the five nearest neighbors for all sale price points. Like the nearest neighbor variables, these matrices allowed us to use them in a function to measure the distance from one to the other.
+
+```{r eval = FALSE}
+library(spdep)
+
+residential2 <- read.csv("opa_properties_public.csv") 
+coords<- cbind(residential2$lng, residential2$lat)
+neighborPoints2 <- knn2nb(knearneigh(coords, 5))
+```
+
+We then created a spatial weight and spatial lag. Finally, we bound the sale price lag back to the `opa` data frame and cleaned it up, so we could join it to our final dataset later.
+
+```{r eval = FALSE}
+spatialWeights2 <- nb2listw(neighborPoints2, style="W")
+saleprice <- lag.listw(spatialWeights2, opa$sale_price)
+SalePrice <- cbind(opa, data.frame(SalePrice = saleprice)) %>% 
+  dplyr::select(parcel_number, SalePrice) %>% 
+  rename(SalePriceLag = SalePrice)
+```
+
+### 6.9 Creation of the `sale_year` and `dayssincesale` Variables
+
+For our final model, we wanted to include parcel-specific variables related to the duration of ownership for the current homeowners. To do this, we first imported property data, then selected only the fields needed for these features from the `opa` dataset. We used the `lubridate` package to alter date columns and used the mutate function to create the new variable `sale_year`.
+
+Then, to create the `dayssincesale` variable, we needed to create an end date from which we would measure back. We set that as the beginning of 2018 (when we began the analysis), allowing us to calculate how many days had passed between the end date and the most recent sale date. This gave us an understanding of how long someone owned their home.
+
+```{r eval = FALSE}
+timeVariables <- read.csv("opa_properties_public.csv") %>% 
+  mutate(sale_date = as.POSIXct(sale_date, format="%m/%d/%Y"),
+         sale_year = format(as.Date(sale_date), "%Y"),
+         end = as.POSIXct("2018-01-01"),
+         dayssincesale = as.numeric(as.integer(end - sale_date))) %>% 
+  dplyr::select(parcel_number, dayssincesale, sale_year)
+```
+
+### 6.10 Creation of the `priorSS` Variable
+
+We created the prior sheriff sale variable to indicate whether a property had one or more sheriff sale deed date in the past 10 years. To create this variable, we read in our sheriff sale data. After splitting the docket number and the deed date into two columns, we aggregated by docket number and counted the number of deeds each property had. Finally, we transformed that information into `0` - no previous sale deed - and `1` - having at least one prior sheriff sale deed. 
+
+```{r eval = FALSE}
+priorSS <- read.csv("sheriff_deed.txt") %>%
+  transform(docketnum = substr(docketnum.sheriff_deed, 1, 9), 
+            date = substr(docketnum.sheriff_deed, 10, 20)) %>%
+  dplyr::select(docketnum, date) %>%
+  group_by(docketnum) %>%
+  summarise(count = n()) %>%
+  transform(priorSS = ifelse(count == 3, 1, 
+                             ifelse(count == 2, 1, 0))) %>% 
+  dplyr::select(docketnum, priorSS)
+```
+
+### 6.11 Joining Variables to Create the Final Dataset
+
+Once these datasets were wrangled, we joined all of them together. First, we joined all of the neighborhood data together, and then joined that to the case data.
+
+```{r eval = FALSE}
+resHOLC_resCensus_join <- left_join(resHOLC_join, 
+                                    resCensus_join, by="Accnt_N") %>%
+  dplyr::select(-geometry.x) %>%
+  rename(geometry = geometry.y)
+
+resHOLC_resCensus_resNN_join <- left_join(resHOLC_resCensus_join, 
+                                          resNN_join, by = "Accnt_N") %>%
+  dplyr::select(-geometry.x) %>%
+  rename(geometry = geometry.y)
+
+neighData <- left_join(resHOLC_resCensus_resNN_join, 
+                       densVariables, by = "Accnt_N")
+
+case_neigh_join <- left_join(neighData, case, by = "Accnt_N")
+```
+
+Then, we created a new binary column to indicate whether a property had gone to sheriff's sale, based on whether it had a date of sheriff deed recorded, and joined the sheriff data to the `case_neigh_join`. 
+
+```{r, eval = FALSE}
+case_neigh_priorSS_join <- left_join(case_neigh_join, priorSS, 
+                                     by = c("Dckt_Nm" = "docketnum"))
+```
+
+We then joined the `events` data to the `neighData_sheriff` dataset, the `timeVariables` dataset to that, and the `SalePrice` data to that.
+
+```{r, eval = FALSE, echo = TRUE}
+case_neigh_priorSS_events_join <- left_join(case_neigh_priorSS_join, 
+                                            events, by = "Accnt_N")
+
+case_neigh_priorSS_events_timeVariables_join <- left_join(case_neigh_priorSS_events_join, 
+                                                timeVariables, 
+                                                by = c("Accnt_N"="parcel_number"))
+
+case_neigh_sheriff_events_timeVariables_saleprice_join <- left_join(
+  case_neigh_priorSS_events_timeVariables_join, 
+                                                          SalePrice, 
+  by = c("Accnt_N"="parcel_number"))
+
+finalData <- left_join(case_neigh_sheriff_events_timeVariables_saleprice_join, 
+                       sheriff, by = "Dckt_Nm") %>% 
+  transform(Sheriff = ifelse(is.na(date), 0, 1)) %>% 
+  dplyr::select(-date) %>% 
+  st_sf() %>% 
+  st_transform(2272)
+```
+
+Finally we created a binary column to indicate whether a property had gone to sheriff sale using the sheriff deed dates dataset. We parsed the data to separate the docket number and date into two columns. Next, we joined this to the other dataset and created the binary variable by using an ifelse statement, which states if there was a date listed for the sheriff sale, this new column would have a `1`; if there was no date, a `0`.
+
+```{r eval = FALSE}
+sheriff <- read.csv("sheriff_deed.txt") %>%
+  transform(Dckt_Nm = substr(docketnum.sheriff_deed, 1, 9), 
+            date = substr(docketnum.sheriff_deed, 10, 20)) %>%
+  select(Dckt_Nm, date) %>%
+  distinct(Dckt_Nm, .keep_all = TRUE)
+
+finalData <- left_join(case_neigh_sheriff_events_timeVariables_saleprice_join, 
+                       sheriff, by = "Dckt_Nm") %>% 
+  transform(Sheriff = ifelse(is.na(date), 0, 1)) %>% 
+  dplyr::select(-date) %>% 
+  st_sf() %>% 
+  st_transform(2272)
+```
+
+We exported `finalData` as a shapefile to save it for future use.
+
+```{r, eval = FALSE, echo = TRUE}
+st_write(finalData, "finalData.shp")
+```
+
+## 7. Model-Building Appendix
+
+In order to create our court, tax, and neighborhood models, we first set the seed to keep our partition consistent each time we ran the code. Before we continued, we checked the structure of the data using `str(finalData)` to ensure all categorical variables were factors. Then, we divided our data into a training subset and a testing subset. 
+
+```{r, eval = FALSE, echo = TRUE}
+library(caret)
+
+set.seed(5224)
+TrainIndex <- createDataPartition(finalData$Sheriff, p = .5,
+                                  list = FALSE,
+                                  times = 1)
+sheriffTrain <- finalData[TrainIndex,] 
+sheriffTest <- finalData[-TrainIndex,]
+```
+
+Once we partitioned our data, we started with a stepwise regression. The upper limit contained all of the variables, while the lower limit just contained the intercept. All of the code in this section is for the neighborhood model, but we used the same code structure for all of our models.
+
+```{r, eval=FALSE, echo = TRUE}
+start.mod_E <- glm(Sheriff ~ HOLC + pct_h_c + pct_vcn + D_Snap + AbVhclD + GrfftDs +
+                     VcHsDst + VcLtDst + DngrBlD + snapDns + abvDens + grfftDn +
+                     vcLtDns + vcHsDns + DngBldD,
+                   data = sheriffTrain,
+                   family = "binomial"(link="logit"))
+
+intonly <- glm(Sheriff ~ 1, data = sheriffTrain, family = "binomial"(link="logit"))
+
+step(intonly, scope = list(lower = intonly, upper = start.mod_E), direction = "both")
+```
+
+Based on the results of this stepwise, we removed any insignificant variables, focusing on ensuring we did not include any "duplicate" variables (such as density and distance of the same factor).
+
+```{r, eval=FALSE, echo = TRUE}
+logreg_neigh <- glm(Sheriff ~ vcLtDns + snapDns + pct_h_c + DngBldD + HOLC + 
+                      VcHsDst + grfftDn + pct_vcn + AbVhclD, 
+                    family = "binomial"(link="logit"),
+                    data = sheriffTrain)
+```
+
+Next, we looked at multicollinearity, or whether two variables had too strong of a relationship to one another to be included in the same model. Based on the summary of our `logreg_neigh` model, we ran a correlation test on two of our variables.
+
+```{r, eval = FALSE, echo = TRUE}
+cor.test(sheriffTrain$vcLtDns,sheriffTrain$DngBldD)
+```
+
+This test confirmed that these two variables were indeed highly correlated, so we ran one model with `vcLtDns` removed.
+
+```{r, eval = FALSE, echo = TRUE}
+logreg_neigh1 <- glm(Sheriff ~ snapDns + pct_h_c + DngBldD + HOLC + 
+                       VcHsDst + grfftDn + pct_vcn + AbVhclD, 
+                     family = "binomial" (link = "logit"),
+                     data = sheriffTrain)
+```
+
+We then ran a second model with `DngBldD` removed.
+
+```{r, eval = FALSE, echo = TRUE}
+logreg_neigh2 <- glm(Sheriff ~ vcLtDns + snapDns + pct_h_c + HOLC + 
+                       VcHsDst + grfftDn + pct_vcn + AbVhclD, 
+                     family = "binomial"(link = "logit"),
+                     data = sheriffTrain)
+```
+
+After creating a series of goodness-of-fit visualizations, which are discussed further in [Section 8.8](#model-visualizations), we performed cross-validation. First, we randomly shuffled the data and then we created 100 equally sized subsets of data, or folds, on which to test. Next, we created an empty data frame to hold the results of each cross-validation.
+
+```{r, eval = FALSE, echo = TRUE}
+new_training <- sheriffTrain[sample(nrow(sheriffTrain)),]
+folds <- cut(seq(1,nrow(sheriffTrain)), breaks=100, labels=FALSE)
+endList <- data.frame()
+```
+
+We then used a for loop to run through each of the 100 folds. We separated the data by fold, then predicted on each test set. For each prediction, we calculated the AUC and appended it to the bottom of our list of results. This allowed us to compare the AUC across folds to ensure that it was consistent, indicating that our model was generalizable across the data.
+
+```{r, eval = FALSE, echo = TRUE}
+for(i in 1:100){
+  #Segment your data by fold using the which() function 
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- sheriffTrain[testIndexes, ]
+  trainData <- sheriffTrain[-testIndexes, ]
+  
+  #Using your pre trained model, predict
+  thisTrain <- glm(Sheriff ~ vcLtDns + snapDns + pct_h_c + HOLC + 
+                     VcHsDst + grfftDn + pct_vcn + AbVhclD, 
+                   family = "binomial"(link = "logit"),
+                   data = trainData)
+  thisPrediction <- predict(thisTrain, testData, type="response")
+  
+  #calculate AUC
+  thisAUC <- pROC::auc(as.factor(testData$Sheriff), as.numeric(thisPrediction))
+  
+  #print
+  endList <- rbind(endList, thisAUC)
+  result <- endList
+}
+```
+
+To see how well our model predicted across Philadelphia, we performed spatial cross-validation. First, we imported a neighborhood shapefile and set it to the correct projection. This process would also work for other types of spatial boundaries, such as communities, political wards, or census tracts. 
+
+```{r, eval = FALSE, echo = TRUE}
+nhoods <- st_read("Neighborhoods_Philadelphia.shp") %>% 
+  st_transform(2272)
+```
+
+Then, we transformed our `finalData` into a spatial object to prepare it for joining.
+
+```{r, eval=FALSE, echo = TRUE}
+finalData_sf <- finalData %>% 
+  st_sf() %>%
+  st_transform(2272)
+```
+
+Next, we grouped together the neighborhoods without any residential properties, so we could remove them from our analysis, and joined `finalData` with `nhoods`. We converted the neighborhood names (`MAPNAME`) to numbers, filtered out neighborhoods without residential properties and selected the regression variables. 
+
+```{r, eval = FALSE, echo = TRUE}
+neighborhoods <- c("Northeast Phila Airport", "Airport",
+                   "Industrial", "Navy Yard", "Port Richmond")
+
+finalDataNHoods <- st_join(finalData_sf, nhoods, join = st_within) %>%
+  as.data.frame() %>%
+  mutate(nhood = as.numeric(MAPNAME)) %>%
+  filter(!(MAPNAME %in% neighborhoods)) %>%
+  dplyr::select(Sheriff, vcLtDns, snapDns, pct_h_c, HOLC, VcHsDst, 
+                grfftDn, pct_vcn, AbVhclD, nhood, geometry)
+```
+
+Then, we created a function to loop through each neighborhood and calculate goodness of fit. In the function, we first initialized the variables we would be using. We then created a unique list of all the neighborhoods, and a counter that would allow the function to complete one cycle through that list. For each neighborhood, we created a test set of properties in that neighborhood, and a training set of properties outside it. We saved our model, then used it to create predictions for the neighborhood. We calculated AUC, saved our results, and repeated the process with the next neighborhood.
+
+```{r, eval = FALSE, echo = TRUE}
+spatialCV <- function(dataFrame, uniqueID, dependentVariable) {
+  
+  #initialize variables  
+  training <- 0
+  testing <- 0
+  tuner <- 0
+  currentUniqueID <- 0
+  uniqueID_List <- 0
+  y <- 0
+  endList <- list()
+  
+  #create a list that is all the neighborhood unique ids in the data frame
+  uniqueID_List <- unique(dataFrame[[uniqueID]])  
+  x <- 1
+  y <- length(uniqueID_List)
+  
+  #create a counter and while it is less than the number of neighborhoods...  
+  while(x <= y) 
+  {
+    
+    #call a current neighborhood   
+    currentUniqueID <- uniqueID_List[x]
+    
+    #create a training set of units not in that neighborhood and a test set of units that are
+    training <- dataFrame[ which(dataFrame[[uniqueID]] != uniqueID_List[x]),]
+    testing <- dataFrame[ which(dataFrame[[uniqueID]] == uniqueID_List[x]),]
+    
+    #save your model as a tuner
+    tuner <- glm(Sheriff ~ vcLtDns + snapDns + pct_h_cb + HOLC + 
+                   VcHsDst + grfftDn + pct_vcn + AbVhclD, 
+                 family = "binomial" (link = "logit"),
+                 data = training)
+    
+    #come up with predictions on the test neighborhood
+    thisPrediction <- predict(tuner, testing, type="response")
+    
+    #calculate auc and count the number of observations
+    thisAUC <- pROC::auc(as.factor(testing$Sheriff), as.numeric(thisPrediction)) 
+    countTestObs <- nrow(testing)
+    
+    #combine the current results
+    thisList <- cbind(currentUniqueID, thisAUC, countTestObs)
+    #add the current results to the final list
+    endList <- rbind(endList, thisList)
+    #iterate counter    
+    x <- x + 1 
+    
+  } 
+  #return the final list
+  return (as.data.frame(endList))
+}
+```
+
+To run this function, we simply input the joined shapefile `finalDataNHoods`, the unique ID `nhood`, and the dependent variable `Sheriff`.
+
+```{r, eval = FALSE, echo = TRUE}
+spatialCV_results <- spatialCV(finalDataNHoods, "nhood", "Sheriff")
+```
+
+We ran through multiple iterations of models for each story, the results of which are shown in the table below. These results helped us to create our final ensemble model.
+
+Model Number | Model Name | Description | AUC | Accuracy | Specificity | Sensitivity
+-------------|------------|-------------|-----|----------|-------------|-------------
+1 | log_courtStep_dummy | Court dummy variables | 0.9963 | 0.9933 | 0.7987 | 0.9953
+2 | log_courtStep_dummy2 | Court dummy variables, without CTYCH_d | 0.9959 | 0.9933 | 0.7989 | 0.9953 
+3 | log_courtStep_count | Court count variables | 0.9869 | 0.9921 | 0.7480 | 0.9946
+4 | log_courtStep | Important court count & dummy variables | 0.9965 | 0.9932 | 0.8301 | 0.9947
+5 | log_courtStep2 | Important court count & dummy variables, without ORDRF_c | 0.9965 | 0.9932 | 0.8300 | 0.9947
+6 | Tax_Step_both | Tax-Only variables | 0.6206 | 0.9870 | 0.1970 | 0.9872
+7 | step_neigh | Neighborhood variables | 0.8223 | 0.9870 | 0.0833 | 0.9872
+8 | logreg_neigh | Neighborhood variables, without repeats | 0.8167 | 0.9869 | 0.1075 | 0.9872
+9 | logreg_neigh1 | Neighborhood variables, without vcLtDns | 0.8158 | 0.9870 | 0.1176 | 0.9872
+
+### 7.1 Making an Ensemble Model
+
+Our final model was created using an ensemble method to combine the power of all three stories into one logistic regression. First, we created three separate data frames that contained only our dependent variable and the variables in the final model for each story.
+
+```{r eval = FALSE}
+story.court <- finalData %>% dplyr::select(Sheriff, AMTCF_d, SHSAL_d,
+                                     Pnlty_c, ORDRF_d, Stayd_d, CTYCH_c,
+                                     AFDVT_c, Post_d, CLLRR_c)
+story.tax <- finalData %>% dplyr::select(Sheriff, TaxLag, interst,
+                                   TotalTx, princpl, othFee, Pnlty_c)
+story.nhood <- finalData %>% dplyr::select(Sheriff, vcLtDns, snapDns, pct_h_cb,
+                                     HOLC, VcHsDst, grfftDn, pct_vcn, AbVhclD)
+```
+
+We then wrote a function that takes each of these stories, creates a random sample, and then trains and tests the model. These predictions are stored in a data frame and the mean predictions for all iterations is taken. 
+
+```{r eval = FALSE}
+ensembleFunction <- function(inputStory, iterations, sampleSize) {
+  
+  #create an empty data frame
+  endList <- data.frame(matrix(NA, nrow = nrow(inputStory), ncol = 0))
+  
+  #build n models with a n% test set
+  for (i in 1:iterations) {
+    sample <- sample.int(n = nrow(inputStory), 
+                         size = floor(sampleSize * nrow(inputStory)), replace = F)
+    train <- inputStory[sample, ]
+    
+    #train the model
+    thisTrain <- glm(Sheriff ~ ., 
+                     data = train,
+                     family = "binomial" (link = "logit"))
+    
+    #create a vector of predictions
+    thisPrediction = exp(predict(thisTrain, finalData))
+    
+    #append to the data frame         
+    endList <- cbind(endList, thisPrediction)
+  }
+  
+  #label each prediction column 1 through n
+  colnames(endList) <- paste("prediction", 1:ncol(endList), sep = "")
+  
+  #create a data frame of average predictions
+  return(data.frame(mean.Prediction = rowMeans(endList)))
+}
+```
+
+Using the above function, we created a data frame called `allStories.predictions`, by running the function on each story using 100 iterations. This data frame contains the mean predictions for every residential parcel in Philadelphia for each story.
+
+```{r eval = FALSE}
+allStories.predictions <- 
+  data.frame(
+    cbind(
+      court.predictions = ensembleFunction(story.court,100,.4)[,1],
+      neighborhood.predictions = ensembleFunction(story.nhood,100,.4)[,1],
+      tax.predictions = ensembleFunction(story.tax,100,.4)[,1]
+    ))
+```
+
+We then joined the dependent variable and the geometry of each residential property to the data frame using `cbind` and renamed the columns. Next, using the same partition created above, we split this data frame into a training and test set.
+
+```{r eval = FALSE}
+ensembleData <- cbind(allStories.predictions, finalData$Sheriff, finalData$geometry)
+colnames(ensembleData) <- c("court.predictions", "tax.predictions",
+                            "neighborhood.predictions", "Sheriff",
+                            "geometry")
+ensembleTrain <- ensembleData[TrainIndex,] 
+ensembleTest <- ensembleData[-TrainIndex,]
+```
+
+Lastly, we created a final model. We used the same validation methods as described in [Section 7](#model-building-appendix) to understand the model's performance. These results were compared to the individual stories to determine if the ensemble model better predicted risk of sheriff sale.
+
+```{r eval = FALSE}
+finalReg <- glm(Sheriff ~ ., 
+                data = ensembleTrain %>% 
+                  dplyr::select(-geometry),
+                family = "binomial" (link = "logit"))
+
+summary(finalReg)
+```
+
+## 8. Visualization Appendix
+
+To keep our visualizations standardized, we created a theme for plots, a theme for maps, and a color scheme.
+
+```{r, eval = FALSE}
+plotTheme <- function(base_size = 12) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = 14,colour = "black"),
+    plot.subtitle = element_text(size = 11, face="italic"),
+    plot.caption = element_text(size = 10, hjust=0),
+    panel.background = element_blank(),
+    panel.grid.major = element_line("grey80", size = 0.1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey80", color = "white"),
+    strip.text = element_text(size=12),
+    axis.title = element_text(size=10),
+    axis.text = element_text(size=8),
+    axis.title.x = element_text(hjust=.5),
+    axis.title.y = element_text(hjust=.5),
+    plot.background = element_blank(),
+    legend.position = "none"
+  )
+}
+
+mapTheme <- function(base_size = 12) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = 14,colour = "black"),
+    plot.subtitle=element_text(size = 12, face="italic"),
+    plot.caption=element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black", fill=NA, size=2)
+  )
+}
+```
+
+To create a consistent color scheme, we used the `viridis` package.
+
+```{r eval = FALSE}
+library(viridis)
+
+#For continuous scales
+scale_fill_viridis(option = "magma")
+
+#For discrete scales
+scale_fill_viridis(option = "magma", discrete = TRUE)
+
+#For two-color plots
+scale_fill_manual(values =  c("#F26660", "#9C337F"))
+```
+
+### 8.1 Count of Parcels Seeing a Commencement of Civil Action
+
+To create the bar graph in [Section 2.1.1](#how-many-properties-have-cases-opened-against-them), we read in our case docket entry file, and converted the dates into date format. We then filtered to only include the case type we were interested in studying. 
+
+```{r chunk1_2.1.1, eval = FALSE}
+library(lubridate)
+
+Commencement <- read.csv("case_docket_entries.txt") %>%
+  mutate(date = as.POSIXct(date)) %>%
+  filter(type == "CIVIL - COMMENCEMENT OF CIVIL ACTION") %>%
+  mutate(date_by_year = round_date(date, unit = "year"))
+```
+
+We also filtered the dataset in `ggplot` to remove any false records (in our case, there were a few observations with dates past the date we pulled the data). In addition, we colored the bars based on the year of commencement and made count of commencement events the y-axis.
+
+```{r eval=FALSE}
+ggplot(data = Commencement[which(Commencement$date_by_year < "2018-01-01"),], 
+       aes(y = "", x = date_by_year, fill = factor(date_by_year))) + 
+  geom_bar(stat = "identity") +
+  labs(x = "Year", y = "Count", 
+       title = "Figure 2. Count of Parcels Seeing a Commencement of Civil Action") +
+  scale_fill_viridis (discrete = TRUE, direction = -1, option ="A") +
+  plotTheme()
+```
+
+### 8.2 Time Series Visualizations
+
+The foreclosure process varies in length from property to property, making it very important to create a dataset that pulls out the length of the process for each parcel that has a case open against it. To create the following code, we used events within the court case data and assigned them a month over the past 10 years, standardizing each entry so that each case started at month zero. 
+
+We began by creating a function to calculate the month from a specific start date. We wanted to create a 10-year window to look at data, so we needed to generate a month column for each month in the past 10 years. Thus, we used a start date of January 1, 2008.
+
+```{r eval = FALSE}
+library(zoo)
+
+mymonth <- function(the_date, start_date = as.POSIXct('2008-01-01')) {
+                    12.0 * (as.yearmon(the_date) - as.yearmon(start_date))}
+```
+
+Next, we used the dataset `fore` created in [Section 6.7](#court-event-fixed-effects-and-count-variables) to calculate the month since the first event, with any duplicate events in the same month removed.
+
+```{r eval = FALSE}
+foreRates <-
+  fore %>%
+  mutate(month = mymonth(date),
+         month = as.integer(month)) %>%
+  filter(month <= 120) %>%
+  dplyr::select(opa_number, month, event) %>%
+  distinct(opa_number, event, .keep_all = TRUE) %>%
+  group_by(opa_number) %>%
+  arrange(month) %>%
+  mutate(monthFrom = month - first(month)) %>%
+  group_by(event, monthFrom) %>%
+  summarise(countEvent = n()) %>%
+  mutate(Rate = countEvent / sum(countEvent))
+```
+
+To create the time series plots, we converted the `event` field from a factor to a character so that the codes could be replaced with descriptions of the events.
+
+```{r eval = FALSE}
+foreRates$event <- as.character(foreRates$event)
+
+foreRates[foreRates$event == "CIVIL", "event"] <- "Commencement of Civil Action"
+foreRates[foreRates$event == "ACTIV", "event"] <- "Active Case"
+foreRates[foreRates$event == "AMTCF", "event"] <- "Amended Tax Claim Filed"
+foreRates[foreRates$event == "CTYCH", "event"] <- "City Charge"
+foreRates[foreRates$event == "AFDVT", "event"] <- "Affidavit of Service Filed"
+foreRates[foreRates$event == "CLLRR", "event"] <- "Listed Rule Returnable Date"
+foreRates[foreRates$event == "ORDRF", "event"] <- "Order Entered"
+foreRates[foreRates$event == "SHSAL", "event"] <- "Sheriff Sale"
+```
+
+Next, we created a column called `mycols`, and assigned a color to each of the events. The colors are HEX codes that correspond to the color scheme specified at the beginning of [Section 8](#visualizations). 
+
+```{r eval = FALSE}
+foreRates$mycols <- ifelse(foreRates$event == "Commencement of Civil Action", "#FDBF7B",
+                      ifelse(foreRates$event == "Active Case", "#9C337F",
+                       ifelse(foreRates$event == "Amended Tax Claim Filed", "#F26660",
+                        ifelse(foreRates$event == "City Charge", "#58256C", 
+                         ifelse(foreRates$event == "Affidavit of Service Filed", "#EB484C",
+                          ifelse(foreRates$event == "Listed Rule Returnable Date", "#B12362",
+                           ifelse(foreRates$event == "Order Entered", "#58256C",
+                            ifelse(foreRates$event == "Sheriff Sale", "#9C337F", 
+                             ifelse(foreRates$event == "Postponed", "#F26660",
+                              ifelse(foreRates$event == "For Sale", "#EB484C",
+                               ifelse(foreRates$event == "Stayed", "#B12362", 
+                                ifelse(foreRates$event == "Penalty", "#58256C", ""))))))))))))
+```
+
+We then made target groups to filter the `foreRates` data frame into the three phases: early, middle, and final.
+
+```{r eval = FALSE}
+targetE <- c("Commencement of Civil Action", "Active Case", 
+             "Amended Tax Claim Filed", "City Charge", "Penalty")
+targetM <- c("Affidavit of Service Filed", 
+             "Listed Rule Returnable Date", "Order Entered")
+targetF <- c("For Sale", "Postponed", "Stayed", "Sheriff Sale")
+
+foreRates_early <- foreRates %>%
+  filter(event %in% targetE)
+
+foreRates_middle <- foreRates %>%
+  filter(event %in% targetM)
+
+foreRates_final <- foreRates %>%
+  filter(event %in% targetF)
+```
+
+Lastly, we plotted the rate of events using `facet_wrap`. The code below only shows plotting for `foreRates_early`, but we used the same code to plot the middle and final events.
+
+```{r eval = FALSE}
+ggplot(foreRates_early, aes(monthFrom, Rate, fill = mycols)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~event) +
+  scale_fill_manual("legend", values = c("#FDBF7B" = "#FDBF7B", "#9C337F" = "#9C337F",
+                                         "#F26660" = "#F26660", "#58256C" = "#58256C",
+                                         "#58256C" = "#58256C")) +
+  labs(title = "Figure 3. Events at the Beginning of Foreclosure Process", 
+       x = "Month from beginning of Case") + 
+  plotTheme()
+```
+
+### 8.3 Sheriff Sales by Political Ward and Council District
+
+Additional transformation of the data was required to create the maps of percent of sheriff sales for each political ward and council district - found in [Section 2.2](#where-are-sheriff-sales-occurring). 
+
+First, we read in the political ward shapefile and transformed it into the correct coordinate system. Using `st_intersection`, we joined the two shapefiles so that each residential property was labeled with its corresponding political ward. This code only shows the process for making the political ward map, but the same process was used to make the council district map.
+
+```{r eval = FALSE}
+library(tidyverse)
+library(sf)
+library(viridis)
+
+wardshape <- st_read("Political_Wards.shp") %>%
+  st_transform(2272)
+
+join <- st_intersection(finalData, wardshape)
+```
+
+Then, we grouped this joined shapefile by ward, which created two new columns that summarized information for each ward. First, the total count of parcels within the ward and second, the sum of the number of sheriff sales that occurred in that ward. These two fields were used to create a percent field, which is the percent of parcels that went to sheriff sale out of the total number of parcels. 
+
+```{r eval = FALSE}
+join <- join %>%
+  mutate(WARD_NUM = as.numeric(WARD_NUM),
+         Sheriff = as.numeric(Sheriff)) %>% 
+  transform(Sheriff = ifelse(Sheriff == 2, 1, 0)) %>%
+  group_by(WARD_NUM) %>%
+  summarize(count = n(),
+            Sheriff = sum(Sheriff)) %>%
+  dplyr::select(count, Sheriff, WARD_NUM) %>%
+  mutate(pct = (Sheriff/count) * 100) %>% 
+  as.data.frame() %>% 
+  mutate(WARD_NUM = as.numeric(WARD_NUM))
+```
+
+The two shapefiles are then converted into data frames so that a `left join` can be performed. The new join file is converted back into a simple feature object. The result is an sf object of all the wards with the percent of sheriff sales as a field. This information is then plotted using `geom_sf` and our color scheme and map theme. 
+
+```{r eval = FALSE}
+wardshape <- wardshape %>% 
+  as.data.frame() %>% 
+  mutate(WARD_NUM = as.numeric(WARD_NUM))
+  
+wards <- left_join(wardshape, join, by = "WARD_NUM") %>%
+  dplyr::select(WARD_NUM, pct, geometry) %>%
+  st_sf %>%
+  st_transform(2272)
+  
+ggplot() +
+  geom_sf(data = wards, aes(fill = pct)) + 
+  scale_fill_viridis(direction = -1, option = "magma", 
+                     name = "Pct") +
+  labs(subtitle = "By Political Ward") +
+  mapTheme()
+```
+
+### 8.4 Nearest Neighbor Maps and Density Plots
+
+To create the nearest neighbor maps and density plots, found in [Section 2.3](#what-neighborhood-factors-coincide-with-areas-of-high-rates-of-sheriff-sales), we first read in a shapefile of the city boundary and our final data, and transformed the boundary shapefile into the correct projections. 
+
+```{r, eval = FALSE}
+library(tidyverse)
+library(sf)
+library(viridis)
+
+phl_boundary <- st_read("City_Plan_Boundary.shp") %>% 
+  st_transform(2272)
+```
+
+Then, we pulled out the coordinates from the `finalData` geometry column, turned it into a data frame, and bound the new X and Y columns to the rest of the `finalData` dataset. This was an important step, because R can process maps much more quickly if a large dataset is a data frame instead of a simple feature.
+
+```{r, eval = FALSE}
+finalData <- st_read("finalData.shp") 
+
+finalData <- finalData %>% 
+  st_coordinates() %>% 
+  as.data.frame() %>% 
+  bind_cols(finalData)
+```
+
+Finally, we used `ggplot` to create each map, with the boundary file as a shapefile in `geom_sf`, but the `finalData` as a data frame run through `geom_point`. The code below only shows the map for the SNAP retailers variable, but we used the same code for all of the variables we mapped.
+
+```{r, eval = FALSE}
+ggplot()+
+  geom_sf(data = phl_boundary, fill = "grey", color = NA) +
+  geom_point(data=finalData, 
+             aes(x=X, y=Y, color= factor(ntile(D_Snap,5))), size = 0.2) +
+  scale_color_viridis(discrete = TRUE, direction = 1, option = "magma", 
+                      labels = as.character(round(quantile(finalData$D_Snap, na.rm = T))),
+                      name = "Distance (ft)") +
+  labs(subtitle = "Distance for Each Residential Property") +
+  mapTheme()
+```
+
+We also used `ggplot` to create each box plot, but first we had to separate the data into the properties that went to sheriff sale, and those that did not. This allowed us to show two boxes, which we could compare on a single plot. We put the distance to SNAP for all of the properties that went to sheriff sale in `finalData_snap1`, and the distance for properties that did not go to sheriff sale in `finalData_snap0`.
+
+```{r, eval = FALSE}
+finalData_snap1 <- finalData %>%
+  filter(finalData$Sheriff == 1) %>%
+  dplyr::select(D_Snap) %>%
+  rename(value = D_Snap) %>%
+  mutate(legendItem = "Yes")
+
+finalData_snap0 <- finalData %>%
+  filter(finalData$Sheriff == 0) %>%
+  dplyr::select(D_Snap) %>%
+  rename(value = D_Snap) %>%
+  mutate(legendItem = "No")
+```
+
+Next, we appended `finalData_snap0` to `finalData_snap1` so that the new dataset, and `legendItem`, could be used in the plot.
+
+```{r, eval = FALSE}
+finalData_snap <- rbind(finalData_snap1, finalData_snap0)
+```
+
+Finally, we used `ggplot` and `geom_boxplot` to create the box plot. By selecting `legendItem` as our fill, we ensured that the viewer could differentiate between the sheriff sale properties and the non-sheriff sale properties. We also chose to remove the outliers from the plot and limit the y-axis to get a close-in view of the distributions. 
+
+```{r, eval = FALSE}
+ggplot() +
+  geom_boxplot(data=finalData_snap, aes(legendItem, value, fill = 
+                                    legendItem), color = "black", outlier.color = NA) +
+  scale_fill_manual(values =  c("#F26660", "#9C337F")) +
+  scale_x_discrete(labels=c("No", "Yes")) +
+  labs(subtitle= "Comparison of Distance for \nSheriff Sale vs. Non-Sheriff Sale Properties",
+       x = "Went to Sheriff Sale", y = "Distance (ft)") +
+  coord_cartesian(ylim = c(0, 3000)) +
+  plotTheme()
+```
+
+### 8.5 Creating Census-Tract Maps and Box Plots
+
+To make the census-tract maps and box plots, we used the ACS data we scraped from the Census API in [Section 6.5](#census-data-wrangling-using-census-api).
+
+To create the map, we used `ggplot` with `geom_sf`. The example below shows the code for the cost-burden map but changing the fill to `finalData$pct_vcn` will create the vacancy rate map.
+
+```{r, eval = FALSE}
+library(tidyverse)
+library(sf)
+library(viridis)
+
+ggplot()+
+  geom_sf(data = PhillyCensusData, 
+          aes(fill = PhillyCensusData$pct_h_cb)) +
+  scale_fill_viridis(direction = -1, option = "magma", 
+                     name = "%\nCost-\nBurdened", 
+                     breaks =c(0, 0.2, 0.4, 0.6), 
+                     labels=c("0", "20", "40", "60")) +
+  labs(subtitle = "Percent of Homeowners who are Cost-Burdened \nby Census Tract") +
+  mapTheme()
+```
+
+To make the box plot, we used `ggplot` with `geom_boxplot`. Unlike in the map, where the fill was our census variable, each box plot's position was determined by the census variable, and the fill was based on the dependent variable. We also made sure to factor our dependent variable to ensure R didn't read it as an integer.
+
+```{r, eval = FALSE}
+ggplot() +
+  geom_boxplot(data=finalData, aes(factor(Sheriff), pct_h_c, fill = 
+                               factor(Sheriff)), color = "black") +
+  scale_fill_manual(values =  c("#F26660", "#9C337F")) +
+  scale_x_discrete(breaks=c(0,1), 
+                   labels=c("No","Yes")) +
+  scale_y_continuous(breaks=c(0, 20, 40, 60), 
+                     labels=c("0%", "20%", "40%", "60%")) +
+  labs(subtitle= "Difference in Census Tract-Level Cost Burden 
+                  \nfor Sheriff Sale vs. Non-Sheriff Sale Properties",
+       x = "Went to Sheriff Sale", 
+       y = "Homeowners Who are Cost-Burdened") +
+  plotTheme()
+```
+
+### 8.6 HOLC Bar Charts  
+
+To create the bar charts showing the percent and count of sheriff sale properties by HOLC grade, we loaded in the libraries listed below, and created a `target` object to limit the data to only properties with HOLC grades.
+
+```{r, eval = FALSE}
+library(tidyverse)
+library(sf)
+library(viridis)
+library(grid)
+library(gridExtra)
+
+target <- c("A", "B", "C", "D")
+```
+
+Next, we created a percent variable of the percent of properties that go to sheriff sale.
+
+```{r, eval = FALSE}
+HOLC <- finalData %>% 
+  group_by(HOLC) %>%
+  summarize(count = n(),
+            Sheriff = sum(Sheriff)) %>%
+  mutate(pct = (Sheriff/count) * 100) %>%
+  filter(HOLC %in% target)
+```
+
+We then created one plot to show percent, and one to show count. We saved each plot in an object, so that we could call them using `grid.arrange` for a side-by-side comparison. 
+
+```{r, eval = FALSE}
+title_HOLC <- textGrob("Figure 15. Properties that go to Sheriff Sale by HOLC Grade", 
+                       gp=gpar(fontface="plain", size = 14))
+
+plot1 <- ggplot(data = HOLC, aes(HOLC, pct, fill=factor(HOLC))) + 
+  geom_bar(stat="identity") +
+  labs(x = "HOLC Grade", y = "Percent", 
+       subtitle = "Percent of Residential Properties") +
+  scale_fill_viridis(discrete = TRUE, direction = -1, option ="A") +
+  plotTheme()
+
+plot2 <- ggplot(data = HOLC, aes(HOLC, Sheriff, fill=factor(HOLC))) + 
+  geom_bar(stat="identity") +
+  labs(x = "HOLC Grade", y = "Count", 
+       subtitle = "Number of Residential Properties") +
+  scale_fill_viridis(discrete = TRUE, direction = -1, option ="A") +
+  plotTheme()
+
+grid.arrange(plot2, plot1, ncol = 2, top = title_HOLC)
+```
+
+### 8.7 Court Rate Bar Chart
+
+The court fixed-effects and count variables were made based on the assumption that a homeowner entering the court system for foreclosure would increase the risk of that property going to sheriff. We were able to visualize this by looking at the rate of properties that have a record for each event of interest. We created this bar chart using the `fore` dataset created in [Section 6.7](#court-event-fixed-effects-and-count-variables). 
+
+We counted the number of events and made a percent by dividing by the total number of residential properties in Philadelphia.
+
+```{r eval = FALSE}
+courtrates <- foreRates %>% 
+  group_by(event) %>% 
+  summarize(total = sum(countEvent)) %>% 
+  mutate(rate = (total/458457)*100)
+```
+
+We then plotted this using our color scheme.
+
+```{r eval = FALSE}
+ggplot(courtrates, aes(reorder(event, -rate), rate, fill = event)) +
+  geom_bar(stat="identity") +
+  labs(x = "Court Event", y = "Rate", 
+       title = "Figure 16. Rate of Properties with Court Event on Record") +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(angle = -45, hjust = 0))  +
+  scale_fill_viridis(discrete = TRUE, direction = 1, option ="A") +
+  plotTheme() 
+```
+
+### 8.8 Model Visualizations
+
+To determine which variables were most important in our regressions, we created bar charts showing the standardized coefficients. First, we standardized the coefficients and created a variable column. We also created a column for the absolute value of the coefficients.
+
+```{r, eval = FALSE}
+library(QuantPsyc)
+
+standardized_final <- as.data.frame(lm.beta(finalReg))
+standardized_final <- standardized_final %>% 
+  mutate(variable = row.names(standardized_final)) %>%
+  rename(std_coefficient = "lm.beta(finalReg)") %>% 
+  mutate(absCoef = abs(std_coefficient))
+```
+
+Next, we created our plot by reordering the variables by their coefficient so that the left-most variable would be the most important one, and the right-most would be the least important.
+
+```{r, eval = FALSE}
+ggplot(standardized_final, aes(x=reorder(variable, -absCoef), 
+                               y = absCoef, fill = variable)) + 
+  labs(x = "variable", y = "Importance") +
+  geom_bar(stat = "identity") + 
+  theme(legend.position = "none", 
+        axis.text.x = element_text(angle = -45, hjust = 0)) + 
+  labs(title = "Variable Importance of Ensemble Model") + 
+  scale_fill_viridis(discrete = TRUE, direction = 1, option ="A") +
+  plotTheme()
+```
+
+For our logistic regressions, including the subset models (court, tax, and neighborhood) and the combined model, we created a series of plots and maps to understand the fit of each model. The code below shows these visualizations for the final model, but we used the same code structure for all of our models.
+
+After running the logistic regression and creating predictions for the test set based on the results from the training set, we plotted a histogram of the predicted probabilities.
+
+```{r eval=FALSE}
+ClassProbs_final <- predict(finalReg, ensembleTest %>% dplyr::select(-geometry), 
+                            type="response")
+
+testProbs_final <- data.frame(Class = ensembleTest$Sheriff,
+                              Probs = ClassProbs_final,
+                              geometry = ensembleTest$geometry) %>%
+  mutate(predClass = ifelse(Probs >.5, 1, 0),
+         Correct = ifelse(Class == predClass, 1, 0),
+         predClass = as.factor(predClass))
+
+ggplot(testProbs_finalReg, aes(Probs, fill = "#F26660")) +
+  geom_histogram() +
+  labs(title = "Final Model", x = "Probability", y = "Number of Properties") +
+  plotTheme()
+```
+
+Next, we plotted ROC curves using `geom_roc` and `geom_abline` for the 50/50 line.
+
+```{r eval=FALSE}
+library(pROC)
+library(plotROC)
+
+ggplot(testProbs_final, aes(d = as.numeric(Class), m = Probs)) + 
+  geom_roc(n.cuts = 50, labels = FALSE) + 
+  geom_abline(slope = 1, intercept = 0, size = 1.5, color = 'grey') +
+  labs(title = "Ensemble Model", x = "False Positive", y = "True Positive") +
+  plotTheme()
+```
+
+To map the test set probabilities, we used a city boundary map, and broke the probabilities into quintiles.
+
+```{r eval=FALSE}
+phl_boundary <- st_read("City_Plan_Boundary.shp") %>% 
+  st_transform(2272)
+
+ggplot() +
+  geom_sf(data = phl_boundary, fill = "grey", color = NA) +
+  geom_point(data=testProbs_final, 
+             aes(x = X, y = Y, color=factor(ntile(Probs,5))), 
+             size=0.2) +
+  labs(title= "Predicted Probabilities of Sheriff Sale \nfor Ensemble Model") +
+  scale_color_viridis(discrete = TRUE, direction = -1, option = "A", 
+                      labels=as.character(round(quantile(testProbs_final$Probs,
+                                                         c(0.1,.2,.4,.6,.8),
+                                                         na.rm=T),10)),
+                      name="Predicted\nProbabilities") +
+  mapTheme()
+```
+
+We created the classification maps using the same city boundary map but plotting whether the output from our model was correct for each property.
+
+```{r eval=FALSE}
+ggplot() +
+  geom_sf(data = phl_boundary, fill = "grey", color = NA) +
+  geom_point(data=testProbs_final, aes(x = X, y = Y, color=factor(Correct)), 
+             size=0.3) +
+  labs(title= "Correct vs Incorrect Classifications") +
+  scale_color_manual(values =  c("#F26660", "#9C337F"), 
+                     labels= c("Incorrect", "Correct"),
+                     name="Classification") +
+  mapTheme()
+```
+
+Using the cross-validation result data frame that was created in [Section 7](#model-building-appendix), we plotted the AUC results from all 100 repeats of the validation.
+
+```{r eval=FALSE}
+ggplot(cvResult, aes(thisAUC)) + 
+  geom_histogram(binwidth = .01, fill = "#9C337F") +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(title="Accuracy of Ensemble Model across 100-Fold Cross Validation",
+       subtitle= "Area Under the Curve",
+       x = "AUC",
+       y = "Count") +
+  plotTheme()
+```
+
+Finally, we used the spatial cross-validation results created in [Section 7](#model-building-appendix) to map the AUC for each neighborhood on a map of Philadelphia. Before we could plot the spatial cross-validation results, we had to prepare our data. We took the results of our spatial cross-validation and joined them to our neighborhoods data so that the results would map properly.
+
+```{r eval=FALSE}
+ensemble_nHood <- st_join(ensembleData, nHood, join = st_within) %>% 
+  as.data.frame() %>% 
+  dplyr::select(court.predictions, neighborhood.predictions, tax.predictions,
+                Sheriff, nHood, geometry, MAPNAME) %>% 
+  filter(ensemble_nHood$MAPNAME %nin% neighborhoods)
+
+spatialCV_result_final <- spatialCV(ensemble_nHood %>% 
+                                      dplyr::select(-geometry, -MAPNAME), 
+                                    "nHood", "Sheriff")
+
+spatialCV_results <- spatialCV_results %>% 
+  mutate(currentUniqueID = as.numeric(currentUniqueID),
+         thisAUC = unlist(thisAUC))
+
+spatialCV_forMapping <- left_join(nHood, spatialCV_results, 
+                                   by = c("nHood" = "currentUniqueID")) %>% 
+  filter(!is.null(nHood),
+         !is.nan(nHood))
+
+ggplot() +
+  geom_sf(data = nHood, fill = "darkgrey") +
+  geom_sf(data = spatialCV_forMapping_final, 
+          aes(fill=thisAUC), colour = NA) +
+  labs(title= "Accuracy of Ensemble Model \nacross Philadelphia Neighborhoods",
+       subtitle = "AUC by Neighborhood") +
+  scale_fill_viridis(discrete = FALSE, direction = -1, option = "A",
+                     name="AUC") +
+  mapTheme()
+```
+
+## 9. Data Dictionary
+
+This data dictionary serves as a Works Cited for this project. Listed below are either the original data sets used, or the variable created out of a data set, along with a brief description and the source of the data. Where possible, links to the source's online location were included.
+
+Name          |  Description                                   |  Source
+--------------|------------------------------------------------|---------------------
+case data | Brief information on the case with docket number and location | Philadelphia Legal Assistance
+case docket entries | Every court entry for each docket number from Foreclosure Court, with associated lawyer information included | Philadelphia Legal Assistance
+sheriff sale deeds | Information regarding a parcel and its sheriff sale actions, with docket number and parcel number | Philadelphia Legal Assistance
+mkt_val | Market value of each property | [Office of Property Assessment](http://www.phila.gov/OPA/Assessments/Pages/AssessmentData.aspx)
+Hmstd_E | Binary variable of whether or not a property was approved for Homestead Exemption | [Office of Property Assessment](http://www.phila.gov/OPA/Assessments/Pages/AssessmentData.aspx)
+salePrice | Price at the last sale of the property | [Office of Property Assessment](http://www.phila.gov/OPA/Assessments/Pages/AssessmentData.aspx)
+lastSale | Date the property was last sold | [Office of Property Assessment](http://www.phila.gov/OPA/Assessments/Pages/AssessmentData.aspx) 
+DangBldg | Point locations of 311 complaints of dangerous buildings | [OpenDataPhilly](https://www.opendataphilly.org/dataset/311-service-and-information-requests)
+VacLot | Point locations of 311 complaints of vacant lots | [OpenDataPhilly](https://www.opendataphilly.org/dataset/311-service-and-information-requests)
+VacHouse | Point locations of 311 complaints of vacant houses | [OpenDataPhilly](https://www.opendataphilly.org/dataset/311-service-and-information-requests)
+Graffiti | Point locations of 311 complaints of graffiti | [OpenDataPhilly](https://www.opendataphilly.org/dataset/311-service-and-information-requests)
+Abvehicles | Point locations of 311 complaints of abandoned vehicles | [OpenDataPhilly](https://www.opendataphilly.org/dataset/311-service-and-information-requests)
+snap_geo | Point locations of retailers accepting SNAP | [USDA](https://www.fns.usda.gov/snap/retailerlocator)
+HOLC | HOLC grade for areas within Philadelphia | [Mapping Inequality](https://dsl.richmond.edu/panorama/redlining/)
+census_cb | The percent of homeowners in a census tract who are cost-burdened | [American Community Survey](https://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?pid=ACS_16_5YR_B25091&prodType=table)
+Census_pct_vac | The percent of vacancy in each census tract | [American Community Survey](https://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?pid=ACS_16_5YR_B25002&prodType=table)
+
